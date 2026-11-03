@@ -56,16 +56,12 @@ function SettingsPanel() {
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
   const [message, setMessage] = useState('')
-  const savePassword = async (event: FormEvent<HTMLFormElement>) => {
+  const savePassword = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const saved = localStorage.getItem('dairy-login-password') ?? 'Matrixx@2026'
     if (current !== saved) { setMessage('Current password is incorrect.'); return }
     if (next.length < 8) { setMessage('New password must be at least 8 characters.'); return }
     if (next !== confirm) { setMessage('New passwords do not match.'); return }
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.auth.updateUser({ password: next })
-      if (error) { setMessage(error.message); return }
-    }
     localStorage.setItem('dairy-login-password', next); setCurrent(''); setNext(''); setConfirm(''); setMessage('Password updated successfully.')
   }
   return <div className="settings-panel"><div className="settings-card"><div className="eyebrow">ACCOUNT SECURITY</div><h2>Change password</h2><p>Update the password used to sign in to DairyDesk.</p><form onSubmit={savePassword}><label>Current password<input type="password" value={current} onChange={e => setCurrent(e.target.value)} /></label><label>New password<input type="password" value={next} onChange={e => setNext(e.target.value)} /></label><label>Confirm new password<input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} /></label>{message && <p className={message.includes('successfully') ? 'settings-success' : 'form-error'}>{message}</p>}<button className="primary-btn" type="submit">Save new password <Icon name="arrow" size={16}/></button></form></div></div>
