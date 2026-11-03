@@ -31,12 +31,15 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 }
 
 function LoginPage({ onLogin }: { onLogin: () => void }) {
+  const LOGIN_NAME = 'admin'
+  const LOGIN_PASSWORD = 'Matrixx@2026'
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!name.trim() || !password) { setError('Enter your name and password to continue.'); return }
+    if (name.trim() !== LOGIN_NAME || password !== LOGIN_PASSWORD) { setError('Incorrect username or password.'); return }
     sessionStorage.setItem('dairy-session', 'active'); onLogin()
   }
   return <div className="login-page"><div className="login-card"><div className="login-brand"><div className="brand-mark">✦</div><div><strong>Dairy<span>Desk</span></strong><small>RETAIL MANAGEMENT</small></div></div><div className="login-copy"><div className="eyebrow">WELCOME BACK</div><h1>Sign in to your store</h1><p>Manage inventory, sales, customers, and credit in one place.</p></div><form onSubmit={submit}><label>Your name<input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name" autoComplete="name"/></label><label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" autoComplete="current-password"/></label>{error && <p className="form-error">{error}</p>}<button className="primary-btn login-button" type="submit">Sign in <Icon name="arrow" size={16}/></button></form><small className="login-footer">Your account data stays private and secure.</small></div></div>
