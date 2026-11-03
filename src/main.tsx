@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from 'react'
+import { useMemo, useState, type FormEvent, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { createCustomer, createProduct, loadRetailData } from './lib/data'
-import { isSupabaseConfigured, supabase } from './lib/supabase'
 
 type Product = { id: number; name: string; brand: string; type: 'Milk' | 'Yoghurt' | 'Sour/Mala'; size: string; stock: number; unit: string; buy: number; sell: number; color: string }
 type Sale = { id: string; product: string; customer?: string; qty: string; amount: number; profit?: number; time: string; method: string; color: string }
@@ -38,14 +36,10 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!name.trim() || !password) { setError('Enter your name and password to continue.'); return }
     if (name.trim() !== LOGIN_NAME || password !== LOGIN_PASSWORD) { setError('Incorrect username or password.'); return }
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.auth.signInWithPassword({ email: 'admin@njenga-milk.local', password })
-      if (error) { setError(error.message); return }
-    }
     sessionStorage.setItem('dairy-session', 'active'); onLogin()
   }
   return <div className="login-page"><div className="login-card"><div className="login-brand"><div className="brand-mark">✦</div><div><strong>Dairy<span>Desk</span></strong><small>RETAIL MANAGEMENT</small></div></div><div className="login-copy"><div className="eyebrow">WELCOME BACK</div><h1>Sign in to your store</h1><p>Manage inventory, sales, customers, and credit in one place.</p></div><form onSubmit={submit}><label>Your name<input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Enter your name" autoComplete="name"/></label><label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" autoComplete="current-password"/></label>{error && <p className="form-error">{error}</p>}<button className="primary-btn login-button" type="submit">Sign in <Icon name="arrow" size={16}/></button></form><small className="login-footer">Your account data stays private and secure.</small></div></div>
@@ -78,17 +72,6 @@ function App() {
   const profit = useMemo(() => sales.reduce((sum, sale) => sum + (sale.profit ?? 0), 0), [sales])
   const filtered = filter === 'All items' ? products : products.filter(p => p.type === filter)
 
-  useEffect(() => {
-    let cancelled = false
-    loadRetailData().then(data => {
-      if (cancelled || !data) return
-      setProducts(data.products.map((p: any) => ({ ...p, id: p.id as unknown as number, color: p.type === 'Yoghurt' ? 'rose' : 'mint' })))
-      setCustomers(data.customers.map((c: any) => ({ id: c.id, name: c.name, phone: c.phone, credit: Number(c.credit), lastPurchase: c.last_purchase_at ? new Date(c.last_purchase_at).toLocaleDateString() : 'No purchases' })))
-      setSales(data.sales.map((s: any) => ({ id: s.id, product: 'Recorded sale', customer: s.customer_id, qty: `${(s.sale_items ?? []).reduce((sum: number, item: any) => sum + item.quantity, 0)} pcs`, amount: Number(s.amount), profit: Number(s.profit), time: new Date(s.created_at).toLocaleString(), method: s.payment_method, color: 'mint' })))
-    }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to load Supabase data'))
-    return () => { cancelled = true }
-  }, [])
-
   const recordSale = () => {
     const item = products[selected]
     const amount = item.sell * quantity
@@ -108,7 +91,6 @@ function App() {
   const addCustomer = () => {
     if (!newCustomer.name.trim()) return
     setCustomers([...customers, { id: Date.now(), name: newCustomer.name.trim(), phone: newCustomer.phone || '—', credit: 0, lastPurchase: 'No purchases' }])
-    void createCustomer({ name: newCustomer.name.trim(), phone: newCustomer.phone || '' }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to save customer'))
     setNewCustomer({ name: '', phone: '' }); setCustomerModal(false); setNotice('Customer added successfully'); setTimeout(() => setNotice(''), 3000)
   }
   const openSale = () => {
@@ -128,7 +110,6 @@ function App() {
     const color = newProduct.variety.toLowerCase().includes('strawberry') ? 'coral' : isYoghurt ? 'rose' : newProduct.type === 'Sour/Mala' ? 'gold' : 'mint'
     const product: Product = { id: Date.now(), name: newProduct.variety, brand: newProduct.company, type: newProduct.type, size: newProduct.size, stock, unit: isYoghurt ? 'packages' : 'pieces', buy: newProduct.buy, sell: newProduct.sell, color }
     setProducts([...products, product]); setProductModal(false); setNotice(`${product.name} added with ${stock} ${product.unit}`)
-    void createProduct({ name: product.name, type: product.type, brand: product.brand, size: product.size, stock: product.stock, unit: product.unit, buy: product.buy, sell: product.sell }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to save product'))
     setTimeout(() => setNotice(''), 3500)
   }
 

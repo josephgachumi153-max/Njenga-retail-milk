@@ -9,12 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0",
     "@vitejs/plugin-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "vite": "latest",
     "typescript": "latest",
-    "vite": "latest"
+    "react": "latest",
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
