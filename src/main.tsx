@@ -12,6 +12,7 @@ const initialProducts: Product[] = []
 
 const initialSales: Sale[] = []
 const initialCustomers: Customer[] = []
+const DEFAULT_LOGIN_PASSWORD = 'Admin@2026'
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -34,13 +35,13 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 
 function LoginPage({ onLogin }: { onLogin: () => void }) {
   const LOGIN_NAME = 'Kenneth Njenga'
-  const [name, setName] = useState('')
+  const [name, setName] = useState(LOGIN_NAME)
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!name.trim() || !password) { setError('Enter your name and password to continue.'); return }
-    const loginPassword = localStorage.getItem('dairy-login-password') ?? 'Matrixx@2026'
+    const loginPassword = localStorage.getItem('dairy-login-password') ?? DEFAULT_LOGIN_PASSWORD
     if (name.trim() !== LOGIN_NAME || password !== loginPassword) { setError('Incorrect username or password.'); return }
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.auth.signInWithPassword({ email: 'admin@njenga-milk.local', password })
@@ -58,7 +59,7 @@ function SettingsPanel() {
   const [message, setMessage] = useState('')
   const savePassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const saved = localStorage.getItem('dairy-login-password') ?? 'Matrixx@2026'
+    const saved = localStorage.getItem('dairy-login-password') ?? DEFAULT_LOGIN_PASSWORD
     if (current !== saved) { setMessage('Current password is incorrect.'); return }
     if (next.length < 8) { setMessage('New password must be at least 8 characters.'); return }
     if (next !== confirm) { setMessage('New passwords do not match.'); return }
