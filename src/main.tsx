@@ -1,18 +1,23 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type ReactElement, type SetStateAction } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { createCustomer, createProduct, loadRetailData } from './lib/data'
+import './features.css'
+import { createCustomer, createProduct, createSale, loadRetailData, updateCustomer, updateProductStock } from './lib/data'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
-type Product = { id: number; name: string; brand: string; type: 'Milk' | 'Yoghurt' | 'Sour/Mala'; size: string; stock: number; unit: string; buy: number; sell: number; color: string }
-type Sale = { id: string; product: string; customer?: string; qty: string; amount: number; profit?: number; time: string; method: string; color: string }
-type Customer = { id: number; name: string; phone: string; credit: number; lastPurchase: string }
+type Id = string | number
+type PaymentMethod = 'Cash' | 'M-Pesa' | 'Credit'
+type Product = { id: Id; name: string; brand: string; type: 'Milk' | 'Yoghurt' | 'Sour/Mala'; size: string; stock: number; unit: string; buy: number; sell: number; reorderLevel: number; color: string }
+type Sale = { id: string; product: string; customer?: string; qty: string; amount: number; amountPaid?: number; creditAmount?: number; profit?: number; time: string; method: PaymentMethod; color: string }
+type Customer = { id: Id; name: string; phone: string; credit: number; lastPurchase: string }
+type NewProductDraft = { variety: string; type: Product['type']; size: string; quantity: number; unitsPerBox: number; buy: number; sell: number; company: string; reorderLevel: number }
 
 const initialProducts: Product[] = []
 
 const initialSales: Sale[] = []
 const initialCustomers: Customer[] = []
 const DEFAULT_LOGIN_PASSWORD = 'Admin@2026'
+const DEFAULT_REORDER_LEVEL = 25
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -72,6 +77,22 @@ function SettingsPanel() {
   return <div className="settings-panel"><div className="settings-card"><div className="eyebrow">ACCOUNT SECURITY</div><h2>Change password</h2><p>Update the password used to sign in to DairyDesk.</p><form onSubmit={savePassword}><label>Current password<input type="password" value={current} onChange={e => setCurrent(e.target.value)} /></label><label>New password<input type="password" value={next} onChange={e => setNext(e.target.value)} /></label><label>Confirm new password<input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} /></label>{message && <p className={message.includes('successfully') ? 'settings-success' : 'form-error'}>{message}</p>}<button className="primary-btn" type="submit">Save new password <Icon name="arrow" size={16}/></button></form></div></div>
 }
 
+function ReorderAlert({ products, onReview }: { products: Product[]; onReview: () => void }) {
+  if (!products.length) return null
+  return <section className="panel reorder-alert"><div className="reorder-heading"><div className="reorder-title"><div className="alert-icon">!</div><div><div className="eyebrow">INVENTORY ALERT</div><h2>Reorder needed</h2><p>{products.length} {products.length === 1 ? 'product is' : 'products are'} at or below the reorder level.</p></div></div><button className="text-btn" onClick={onReview}>Review inventory <Icon name="arrow" size={14}/></button></div><div className="reorder-items">{products.slice(0, 3).map(product => <div className="reorder-item" key={product.id}><div><b>{product.name}</b><small>{product.brand} Â· reorder at {product.reorderLevel} {product.unit}</small></div><strong>{product.stock} left</strong></div>)}{products.length > 3 && <small className="reorder-more">+{products.length - 3} more products need attention</small>}</div></section>
+}
+
+function ProductEntryModal({ open, draft, setDraft, companies, onClose, onSave }: { open: boolean; draft: NewProductDraft; setDraft: Dispatch<SetStateAction<NewProductDraft>>; companies: string[]; onClose: () => void; onSave: () => void }) {
+  if (!open) return null
+  const stock = draft.quantity * draft.unitsPerBox
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal wide-modal" onClick={event => event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">INVENTORY / PRODUCT SETUP</div><h2>Add product</h2></div><button className="close-btn" onClick={onClose}><Icon name="close"/></button></div><div className="form-grid"><label>Product variety<input value={draft.variety} onChange={event => setDraft(previous => ({ ...previous, variety: event.target.value }))} placeholder="e.g. Vanilla Yoghurt"/></label><label>Product type<select value={draft.type} onChange={event => setDraft(previous => ({ ...previous, type: event.target.value as Product['type'] }))}><option>Milk</option><option>Yoghurt</option><option>Sour/Mala</option></select></label><label>Pack size<select value={draft.size} onChange={event => setDraft(previous => ({ ...previous, size: event.target.value }))}><option>250 ml</option><option>350 ml</option><option>500 ml</option><option>1 litre</option><option>2 litres</option></select></label><label>Company / brand<input list="company-options" value={draft.company} onChange={event => setDraft(previous => ({ ...previous, company: event.target.value }))} placeholder="Search or enter a company"/><datalist id="company-options">{companies.map(company => <option value={company} key={company}/>)}</datalist><small className="field-note">Saved automatically for the next product.</small></label><label>{draft.type === 'Yoghurt' ? 'Packages received' : 'Boxes received'}<input type="number" min="1" value={draft.quantity} onChange={event => setDraft(previous => ({ ...previous, quantity: Math.max(1, Number(event.target.value)) }))}/></label><label>Units per {draft.type === 'Yoghurt' ? 'package' : 'box'}<input type="number" min="1" value={draft.unitsPerBox} onChange={event => setDraft(previous => ({ ...previous, unitsPerBox: Math.max(1, Number(event.target.value)) }))}/></label><label>Buying price / unit<input type="number" min="0" value={draft.buy} onChange={event => setDraft(previous => ({ ...previous, buy: Math.max(0, Number(event.target.value)) }))}/></label><label>Selling price / unit<input type="number" min="0" value={draft.sell} onChange={event => setDraft(previous => ({ ...previous, sell: Math.max(0, Number(event.target.value)) }))}/></label><label>Reorder when stock reaches<input type="number" min="0" value={draft.reorderLevel} onChange={event => setDraft(previous => ({ ...previous, reorderLevel: Math.max(0, Number(event.target.value)) }))}/></label></div><div className="product-preview"><span>Opening stock: <b>{stock} pieces</b></span><span>Profit / unit: <b className={draft.sell >= draft.buy ? 'profit-positive' : 'profit-negative'}>KES {draft.sell - draft.buy}</b></span></div><button className="primary-btn full" onClick={onSave}>Save product <Icon name="arrow" size={16}/></button></div></div>
+}
+
+function SaleCheckoutModal({ open, products, selected, setSelected, quantity, setQuantity, customers, customerName, setCustomerName, paymentMethod, setPaymentMethod, amountPaid, setAmountPaid, totalSale, creditDue, saving, onClose, onSave }: { open: boolean; products: Product[]; selected: number; setSelected: (value: number) => void; quantity: number; setQuantity: (value: number) => void; customers: Customer[]; customerName: string; setCustomerName: (value: string) => void; paymentMethod: PaymentMethod; setPaymentMethod: (value: PaymentMethod) => void; amountPaid: number; setAmountPaid: (value: number) => void; totalSale: number; creditDue: number; saving: boolean; onClose: () => void; onSave: () => void }) {
+  if (!open || !products[selected]) return null
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal wide-modal" onClick={event => event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">POINT OF SALE / CUSTOMER</div><h2>Record a sale</h2></div><button className="close-btn" onClick={onClose}><Icon name="close"/></button></div><label>Product<select value={selected} onChange={event => setSelected(Number(event.target.value))}>{products.map((product, index) => <option value={index} key={product.id}>{product.name} - {product.brand} {product.size} - KES {product.sell}</option>)}</select></label><div className="form-grid"><label>Quantity sold<input type="number" min="1" value={quantity} onChange={event => setQuantity(Math.max(1, Number(event.target.value)))}/></label><label>Customer name<input list="customer-options" value={customerName === 'Walk-in customer' ? '' : customerName} onChange={event => setCustomerName(event.target.value || 'Walk-in customer')} placeholder="Search or enter a customer"/><datalist id="customer-options">{customers.map(customer => <option key={customer.id} value={customer.name}/>)}</datalist><small className="field-note">New customers are saved automatically.</small></label><label>Payment method<select value={paymentMethod} onChange={event => setPaymentMethod(event.target.value as PaymentMethod)}><option>Cash</option><option>M-Pesa</option><option>Credit</option></select></label><label>Amount paid<input type="number" min="0" max={totalSale} value={amountPaid} onChange={event => setAmountPaid(Math.max(0, Number(event.target.value)))}/></label></div><div className={`payment-summary ${creditDue > 0 ? 'has-credit' : ''}`}><span>{creditDue > 0 ? 'Credit to track' : 'Payment complete'}<small>{creditDue > 0 ? 'This balance will be added to the customer.' : 'No outstanding balance on this sale.'}</small></span><strong>KES {creditDue.toLocaleString()}</strong></div><div className="sale-total"><span>Total sale</span><strong>KES {totalSale.toLocaleString()}</strong></div><button className="primary-btn full" onClick={onSave} disabled={saving}>{saving ? 'Saving sale...' : 'Complete sale'} {!saving && <Icon name="arrow" size={16}/>}</button></div></div>
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => sessionStorage.getItem('dairy-session') === 'active')
   const [active, setActive] = useState('Overview')
@@ -79,7 +100,9 @@ function App() {
   const [sales, setSales] = useState(initialSales)
   const [customers, setCustomers] = useState(initialCustomers)
   const [modal, setModal] = useState(false)
-  const [saleFormModal, setSaleFormModal] = useState(false)
+  const [enhancedSaleModal, setEnhancedSaleModal] = useState(false)
+  const saleFormModal = false
+  const setSaleFormModal = (open: boolean) => setEnhancedSaleModal(open)
   const [stockModal, setStockModal] = useState(false)
   const [selected, setSelected] = useState(0)
   const [quantity, setQuantity] = useState(1)
@@ -87,30 +110,56 @@ function App() {
   const [loosePieces, setLoosePieces] = useState(0)
   const [supplier, setSupplier] = useState('Brookside Dairy')
   const [customerName, setCustomerName] = useState('Walk-in customer')
-  const [paymentMethod, setPaymentMethod] = useState('Cash')
+  const [paymentMethod, setPaymentMethodState] = useState<PaymentMethod>('Cash')
+  const setPaymentMethod = (value: string) => setPaymentMethodState(value as PaymentMethod)
+  const [amountPaid, setAmountPaid] = useState(0)
+  const [savingSale, setSavingSale] = useState(false)
   const [customerModal, setCustomerModal] = useState(false)
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' })
-  const [productModal, setProductModal] = useState(false)
-  const [newProduct, setNewProduct] = useState({ variety: 'Fresh Milk', type: 'Milk' as Product['type'], size: '500 ml', quantity: 1, unitsPerBox: 12, buy: 48, sell: 60, company: 'Brookside' })
+  const [enhancedProductModal, setEnhancedProductModal] = useState(false)
+  const productModal = false
+  const setProductModal = (open: boolean) => setEnhancedProductModal(open)
+  const [newProduct, setNewProduct] = useState({ variety: 'Fresh Milk', type: 'Milk' as Product['type'], size: '500 ml', quantity: 1, unitsPerBox: 12, buy: 48, sell: 60, company: 'Brookside', reorderLevel: DEFAULT_REORDER_LEVEL })
   const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState('All items')
+  const [savedCompanies, setSavedCompanies] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('dairy-companies') ?? '[]') as string[] } catch { return [] }
+  })
   const revenue = useMemo(() => sales.reduce((sum, sale) => sum + sale.amount, 0), [sales])
   const profit = useMemo(() => sales.reduce((sum, sale) => sum + (sale.profit ?? 0), 0), [sales])
   const filtered = filter === 'All items' ? products : products.filter(p => p.type === filter)
+  const totalSale = products[selected] ? products[selected].sell * quantity : 0
+  const creditDue = Math.max(0, totalSale - amountPaid)
+  const lowStockProducts = useMemo(() => products.filter(product => product.stock <= product.reorderLevel), [products])
+  const companies = useMemo(() => Array.from(new Set([...savedCompanies, ...products.map(product => product.brand).filter(Boolean)])).sort(), [products, savedCompanies])
+
+  useEffect(() => {
+    setAmountPaid(paymentMethod === 'Credit' ? 0 : totalSale)
+  }, [paymentMethod, totalSale])
+
+  const rememberCompany = (company: string) => {
+    const name = company.trim()
+    if (!name) return
+    setSavedCompanies(previous => {
+      const next = Array.from(new Set([...previous, name])).sort()
+      localStorage.setItem('dairy-companies', JSON.stringify(next))
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!isAuthenticated) return
     let cancelled = false
     loadRetailData().then(data => {
       if (cancelled || !data) return
-      setProducts(data.products.map((p: any) => ({ ...p, id: p.id as unknown as number, color: p.type === 'Yoghurt' ? 'rose' : 'mint' })))
+      setProducts(data.products.map((p: any) => ({ ...p, id: p.id, reorderLevel: Number(p.reorder_level ?? p.reorderLevel ?? DEFAULT_REORDER_LEVEL), color: p.type === 'Yoghurt' ? 'rose' : 'mint' })))
       setCustomers(data.customers.map((c: any) => ({ id: c.id, name: c.name, phone: c.phone, credit: Number(c.credit), lastPurchase: c.last_purchase_at ? new Date(c.last_purchase_at).toLocaleDateString() : 'No purchases' })))
-      setSales(data.sales.map((s: any) => ({ id: s.id, product: 'Recorded sale', customer: s.customer_id, qty: `${(s.sale_items ?? []).reduce((sum: number, item: any) => sum + item.quantity, 0)} pcs`, amount: Number(s.amount), profit: Number(s.profit), time: new Date(s.created_at).toLocaleString(), method: s.payment_method, color: 'mint' })))
+      setSales(data.sales.map((s: any) => ({ id: s.id, product: 'Recorded sale', customer: s.customer_id, qty: `${(s.sale_items ?? []).reduce((sum: number, item: any) => sum + item.quantity, 0)} pcs`, amount: Number(s.amount), amountPaid: Number(s.paid_amount ?? s.amount), creditAmount: Number(s.credit_amount ?? 0), profit: Number(s.profit), time: new Date(s.created_at).toLocaleString(), method: s.payment_method as PaymentMethod, color: 'mint' })))
     }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to load Supabase data'))
     return () => { cancelled = true }
   }, [isAuthenticated])
 
-  const recordSale = () => {
+  const legacyRecordSale = () => {
     const item = products[selected]
     const amount = item.sell * quantity
     setProducts(products.map(p => p.id === item.id ? { ...p, stock: Math.max(0, p.stock - quantity) } : p))
@@ -126,7 +175,7 @@ function App() {
     setModal(false); setSaleFormModal(false); setQuantity(1); setNotice('Sale recorded and inventory updated')
     setTimeout(() => setNotice(''), 3000)
   }
-  const addCustomer = () => {
+  const legacyAddCustomer = () => {
     if (!newCustomer.name.trim()) return
     setCustomers([...customers, { id: Date.now(), name: newCustomer.name.trim(), phone: newCustomer.phone || '—', credit: 0, lastPurchase: 'No purchases' }])
     void createCustomer({ name: newCustomer.name.trim(), phone: newCustomer.phone || '' }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to save customer'))
@@ -136,31 +185,116 @@ function App() {
     if (!products.length) { setActive('Inventory'); setNotice('Add a product to inventory before recording a sale'); setTimeout(() => setNotice(''), 3500); return }
     setSaleFormModal(true)
   }
-  const receiveStock = () => {
+  const legacyReceiveStock = () => {
     const item = products[selected]
     const received = boxes * 12 + loosePieces
     setProducts(products.map(p => p.id === item.id ? { ...p, stock: p.stock + received } : p))
     setStockModal(false); setBoxes(1); setLoosePieces(0); setNotice(`${received} pieces of ${item.name} received from ${supplier}`)
     setTimeout(() => setNotice(''), 3500)
   }
-  const addProduct = () => {
+  const legacyAddProduct = () => {
     const isYoghurt = newProduct.type === 'Yoghurt'
     const stock = newProduct.quantity * newProduct.unitsPerBox
     const color = newProduct.variety.toLowerCase().includes('strawberry') ? 'coral' : isYoghurt ? 'rose' : newProduct.type === 'Sour/Mala' ? 'gold' : 'mint'
-    const product: Product = { id: Date.now(), name: newProduct.variety, brand: newProduct.company, type: newProduct.type, size: newProduct.size, stock, unit: isYoghurt ? 'packages' : 'pieces', buy: newProduct.buy, sell: newProduct.sell, color }
+    const product: Product = { id: Date.now(), name: newProduct.variety, brand: newProduct.company, type: newProduct.type, size: newProduct.size, stock, unit: isYoghurt ? 'packages' : 'pieces', buy: newProduct.buy, sell: newProduct.sell, reorderLevel: DEFAULT_REORDER_LEVEL, color }
     setProducts([...products, product]); setProductModal(false); setNotice(`${product.name} added with ${stock} ${product.unit}`)
     void createProduct({ name: product.name, type: product.type, brand: product.brand, size: product.size, stock: product.stock, unit: product.unit, buy: product.buy, sell: product.sell }).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to save product'))
     setTimeout(() => setNotice(''), 3500)
   }
 
-  return isAuthenticated ? <div className="app-shell">
+  const recordSale = async () => {
+    const item = products[selected]
+    if (!item || savingSale) return
+    const amount = item.sell * quantity
+    const paid = Math.max(0, Number(amountPaid) || 0)
+    const customerLabel = customerName.trim()
+    const isWalkIn = !customerLabel || customerLabel === 'Walk-in customer'
+    const creditAmount = paymentMethod === 'Credit' ? Math.max(0, amount - paid) : 0
+    if (quantity > item.stock) { setNotice(`Only ${item.stock} ${item.unit} of ${item.name} are available`); return }
+    if (paid > amount) { setNotice('Amount paid cannot be greater than the sale total'); return }
+    if (paymentMethod !== 'Credit' && paid < amount) { setNotice('Enter the full amount paid for cash or M-Pesa sales'); return }
+    if (paymentMethod === 'Credit' && isWalkIn) { setNotice('Choose or enter a customer before recording credit'); return }
+
+    setSavingSale(true)
+    try {
+      const existingCustomer = !isWalkIn ? customers.find(customer => customer.name.toLowerCase() === customerLabel.toLowerCase()) : undefined
+      let customerId: Id | null = existingCustomer?.id ?? null
+      let customerCredit = existingCustomer?.credit ?? 0
+      if (!isWalkIn && !existingCustomer) {
+        const savedCustomer = await createCustomer({ name: customerLabel, phone: '' })
+        customerId = savedCustomer?.id ?? Date.now()
+      }
+      if (!isWalkIn) {
+        customerCredit += creditAmount
+        await updateCustomer({ id: customerId!, credit: customerCredit })
+      }
+
+      const stockAfter = Math.max(0, item.stock - quantity)
+      const profitAmount = (item.sell - item.buy) * quantity
+      const savedSale = await createSale({ customerId, productId: item.id, quantity, amount, amountPaid: paid, creditAmount, profit: profitAmount, paymentMethod, stockAfter, unitBuy: item.buy, unitSell: item.sell })
+      setProducts(previous => previous.map(product => product.id === item.id ? { ...product, stock: stockAfter } : product))
+      setSales(previous => [{ id: savedSale?.id ?? `#DR-${1049 + previous.length}`, product: `${item.name} - ${item.brand} ${item.size}`, customer: isWalkIn ? 'Walk-in customer' : customerLabel, qty: `${quantity} ${quantity === 1 ? 'pc' : 'pcs'}`, amount, amountPaid: paid, creditAmount, profit: profitAmount, time: 'just now', method: paymentMethod, color: item.color }, ...previous])
+      if (!isWalkIn) {
+        setCustomers(previous => existingCustomer
+          ? previous.map(customer => customer.id === existingCustomer.id ? { ...customer, credit: customerCredit, lastPurchase: 'Today' } : customer)
+          : [...previous, { id: customerId!, name: customerLabel, phone: '-', credit: customerCredit, lastPurchase: 'Today' }])
+      }
+      setModal(false); setSaleFormModal(false); setQuantity(1); setAmountPaid(0); setNotice(creditAmount ? `Sale recorded; KES ${creditAmount.toLocaleString()} added to ${customerLabel}'s credit` : 'Sale recorded and inventory updated')
+      setTimeout(() => setNotice(''), 3500)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to save sale')
+      setTimeout(() => setNotice(''), 4500)
+    } finally {
+      setSavingSale(false)
+    }
+  }
+
+  const addCustomer = async () => {
+    if (!newCustomer.name.trim()) return
+    try {
+      const saved = await createCustomer({ name: newCustomer.name.trim(), phone: newCustomer.phone || '' })
+      setCustomers(previous => [...previous, { id: saved?.id ?? Date.now(), name: newCustomer.name.trim(), phone: newCustomer.phone || '-', credit: 0, lastPurchase: 'No purchases' }])
+      setNewCustomer({ name: '', phone: '' }); setCustomerModal(false); setNotice('Customer saved successfully'); setTimeout(() => setNotice(''), 3000)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to save customer')
+    }
+  }
+
+  const receiveStock = () => {
+    const item = products[selected]
+    const received = boxes * 12 + loosePieces
+    if (!item || received <= 0) { setNotice('Enter stock to receive'); return }
+    const updatedStock = item.stock + received
+    setProducts(previous => previous.map(product => product.id === item.id ? { ...product, stock: updatedStock } : product))
+    void updateProductStock(item.id, updatedStock).catch(error => setNotice(error instanceof Error ? error.message : 'Unable to save stock update'))
+    setStockModal(false); setBoxes(1); setLoosePieces(0); setNotice(`${received} pieces of ${item.name} received from ${supplier}`)
+    setTimeout(() => setNotice(''), 3500)
+  }
+
+  const addProduct = async () => {
+    const isYoghurt = newProduct.type === 'Yoghurt'
+    const stock = newProduct.quantity * newProduct.unitsPerBox
+    const color = newProduct.variety.toLowerCase().includes('strawberry') ? 'coral' : isYoghurt ? 'rose' : newProduct.type === 'Sour/Mala' ? 'gold' : 'mint'
+    const company = newProduct.company.trim()
+    rememberCompany(company)
+    try {
+      const saved = await createProduct({ name: newProduct.variety, type: newProduct.type, brand: company, size: newProduct.size, stock, unit: isYoghurt ? 'packages' : 'pieces', buy: newProduct.buy, sell: newProduct.sell, reorderLevel: newProduct.reorderLevel })
+      const product: Product = { id: saved?.id ?? Date.now(), name: newProduct.variety, brand: company, type: newProduct.type, size: newProduct.size, stock, unit: isYoghurt ? 'packages' : 'pieces', buy: newProduct.buy, sell: newProduct.sell, reorderLevel: Number(saved?.reorder_level ?? newProduct.reorderLevel), color }
+      setProducts(previous => [...previous, product]); setProductModal(false); setNotice(`${product.name} added with ${stock} ${product.unit}`)
+      setTimeout(() => setNotice(''), 3500)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to save product')
+    }
+  }
+
+  return isAuthenticated ? <><div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">✦</div><div><strong>Dairy<span>Desk</span></strong><small>RETAIL MANAGEMENT</small></div></div>
       <div className="store-switch"><div className="store-icon">M</div><div><b>Milk Point · CBD</b><small>MAIN OUTLET</small></div><span>⌄</span></div>
       <nav><div className="nav-label">WORKSPACE</div>{[['Overview','grid'],['Inventory','box'],['Sales & POS','cart'],['Customers','user'],['Reports','chart']].map(([label, icon]) => <button key={label} className={active === label ? 'nav-item active' : 'nav-item'} onClick={() => setActive(label)}><Icon name={icon}/>{label}{label === 'Inventory' && <em>3</em>}</button>)}<div className="nav-label second">MANAGE</div><button className="nav-item" onClick={() => setActive('Settings')}><Icon name="settings"/>Settings</button></nav>
       <div className="sidebar-bottom"><div className="help-card"><div className="help-icon">?</div><div><b>Need a hand?</b><small>View getting started guide</small></div><Icon name="arrow" size={15}/></div><div className="profile"><div className="avatar">KN</div><div><b>Kenneth Njenga</b><small>Administrator</small></div><Icon name="more" size={16}/></div></div>
     </aside>
-    <main className="main-content">
+    <main className="main-content"><ReorderAlert products={lowStockProducts} onReview={() => setActive('Inventory')} />
       <header className="topbar"><div className="breadcrumb"><span>Milk Point · CBD</span><b>/</b><strong>{active}</strong></div><div className="top-actions"><div className="date-pill">Nov 03, 2026 <span>⌄</span></div><button className="icon-button"><Icon name="bell"/><i></i></button><div className="top-avatar">JM</div></div></header>
       {active !== 'Overview' ? active === 'Settings' ? <SettingsPanel /> : <section className="placeholder-page"><div className="eyebrow">DAIRYDESK / {active.toUpperCase()}</div><h1>{active}</h1><p>{active === 'Customers' ? 'Customers, purchase history and outstanding credit.' : 'This workspace is ready for your next operation.'}</p>{active === 'Inventory' ? <div className="action-row"><button className="primary-btn" onClick={() => setProductModal(true)}><Icon name="plus" size={17}/> Add product</button><button className="secondary-btn" onClick={() => setStockModal(true)}><Icon name="box" size={16}/> Receive stock</button></div> : active === 'Customers' ? <><button className="primary-btn" onClick={() => setCustomerModal(true)}><Icon name="plus" size={17}/> Add customer</button><div className="customer-list">{customers.map(customer => <div className="customer-card" key={customer.id}><div className="customer-avatar">{customer.name.slice(0, 1)}</div><div className="customer-info"><b>{customer.name}</b><small>{customer.phone} · Last purchase: {customer.lastPurchase}</small></div><div className="customer-credit"><small>OUTSTANDING CREDIT</small><b className={customer.credit ? 'credit-due' : 'credit-clear'}>KES {customer.credit.toLocaleString()}</b></div></div>)}</div></> : <button className="primary-btn" onClick={openSale}><Icon name="plus" size={17}/> Record a sale</button>}</section> : <>
       <section className="welcome-row"><div><div className="eyebrow">TODAY</div><h1>Welcome to DairyDesk <span>✦</span></h1><p>Start by adding your products and recording your first sale.</p></div><button className="primary-btn" onClick={openSale}><Icon name="plus" size={17}/> Record a sale</button></section>
@@ -175,7 +309,7 @@ function App() {
     {productModal && <div className="modal-backdrop" onClick={() => setProductModal(false)}><div className="modal wide-modal" onClick={e => e.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">INVENTORY / PRODUCT SETUP</div><h2>Add product</h2></div><button className="close-btn" onClick={() => setProductModal(false)}><Icon name="close"/></button></div><div className="form-grid"><label>Product variety<input value={newProduct.variety} onChange={e => setNewProduct({ ...newProduct, variety: e.target.value })} placeholder="e.g. Vanilla Yoghurt"/></label><label>Product type<select value={newProduct.type} onChange={e => setNewProduct({ ...newProduct, type: e.target.value as Product['type'] })}><option>Milk</option><option>Yoghurt</option><option>Sour/Mala</option></select></label><label>Pack size<select value={newProduct.size} onChange={e => setNewProduct({ ...newProduct, size: e.target.value })}><option>250 ml</option><option>350 ml</option><option>500 ml</option><option>1 litre</option><option>2 litres</option></select></label><label>Company / brand<input value={newProduct.company} onChange={e => setNewProduct({ ...newProduct, company: e.target.value })} placeholder="e.g. Brookside"/></label><label>{newProduct.type === 'Yoghurt' ? 'Packages received' : 'Boxes received'}<input type="number" min="1" value={newProduct.quantity} onChange={e => setNewProduct({ ...newProduct, quantity: Math.max(1, Number(e.target.value)) })}/></label><label>Units per {newProduct.type === 'Yoghurt' ? 'package' : 'box'}<input type="number" min="1" value={newProduct.unitsPerBox} onChange={e => setNewProduct({ ...newProduct, unitsPerBox: Math.max(1, Number(e.target.value)) })}/></label><label>Buying price / unit<input type="number" min="0" value={newProduct.buy} onChange={e => setNewProduct({ ...newProduct, buy: Math.max(0, Number(e.target.value)) })}/></label><label>Selling price / unit<input type="number" min="0" value={newProduct.sell} onChange={e => setNewProduct({ ...newProduct, sell: Math.max(0, Number(e.target.value)) })}/></label></div><div className="product-preview"><span>Opening stock: <b>{newProduct.quantity * newProduct.unitsPerBox} pieces</b></span><span>Profit / unit: <b className={newProduct.sell >= newProduct.buy ? 'profit-positive' : 'profit-negative'}>KES {newProduct.sell - newProduct.buy}</b></span></div><button className="primary-btn full" onClick={addProduct}>Add product to inventory <Icon name="arrow" size={16}/></button></div></div>}
     {stockModal && <div className="modal-backdrop" onClick={() => setStockModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">INVENTORY / INCOMING STOCK</div><h2>Receive stock</h2></div><button className="close-btn" onClick={() => setStockModal(false)}><Icon name="close"/></button></div><label>Product<select value={selected} onChange={e => setSelected(Number(e.target.value))}>{products.map((p, i) => <option value={i} key={p.id}>{p.name} · {p.brand} {p.size}</option>)}</select></label><label>Supplier<select value={supplier} onChange={e => setSupplier(e.target.value)}><option>Brookside Dairy</option><option>KCC</option><option>Bio Foods</option><option>Other supplier</option></select></label><div className="split-fields"><label>Boxes received<input type="number" min="0" value={boxes} onChange={e => setBoxes(Math.max(0, Number(e.target.value)))}/></label><label>Loose pieces<input type="number" min="0" value={loosePieces} onChange={e => setLoosePieces(Math.max(0, Number(e.target.value)))}/></label></div><div className="sale-total"><span>Stock to add <small>(12 pieces per box)</small></span><strong>{boxes * 12 + loosePieces} pcs</strong></div><button className="primary-btn full" onClick={receiveStock}>Add to inventory <Icon name="arrow" size={16}/></button></div></div>}
     {modal && <div className="modal-backdrop" onClick={() => setModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">POINT OF SALE</div><h2>Record a sale</h2></div><button className="close-btn" onClick={() => setModal(false)}><Icon name="close"/></button></div><label>Product<select value={selected} onChange={e => setSelected(Number(e.target.value))}>{products.map((p, i) => <option value={i} key={p.id}>{p.name} · {p.brand} {p.size} — KES {p.sell}</option>)}</select></label><label>Quantity <span className="field-hint">sold by piece</span><div className="quantity"><button onClick={() => setQuantity(Math.max(1, quantity - 1))}>−</button><strong>{quantity}</strong><button onClick={() => setQuantity(quantity + 1)}>+</button></div></label><div className="sale-total"><span>Total to collect</span><strong>KES {(products[selected].sell * quantity).toLocaleString()}</strong></div><button className="primary-btn full" onClick={recordSale}>Complete sale <Icon name="arrow" size={16}/></button></div></div>}
-  </div> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
+  </div><ProductEntryModal open={enhancedProductModal} draft={newProduct} setDraft={setNewProduct} companies={companies} onClose={() => setEnhancedProductModal(false)} onSave={addProduct}/><SaleCheckoutModal open={enhancedSaleModal} products={products} selected={selected} setSelected={setSelected} quantity={quantity} setQuantity={setQuantity} customers={customers} customerName={customerName} setCustomerName={setCustomerName} paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethodState} amountPaid={amountPaid} setAmountPaid={setAmountPaid} totalSale={totalSale} creditDue={creditDue} saving={savingSale} onClose={() => setEnhancedSaleModal(false)} onSave={recordSale}/></> : <LoginPage onLogin={() => setIsAuthenticated(true)} />
 }
 
 createRoot(document.getElementById('root')!).render(<App />)
